@@ -18,12 +18,12 @@ Priserna är Nord Pools day-ahead-priser från [Elpriset just nu.se](https://www
 
 ### Alternativ A – GitHub bygger APK:n åt dig (ingen Android Studio behövs)
 
-1. Skapa ett **privat** repo på github.com.
-2. Ladda upp hela innehållet i den här mappen. Mappen `.github` är dold i Finder/Utforskaren – den måste med.
-   Enklast: `git init && git add . && git commit -m "Hemma" && git push`.
-3. Öppna fliken **Actions** → körningen **Bygg APK** startar av sig själv (ca 5 min).
-4. Klicka på körningen → under **Artifacts** laddar du ner `hemma-apk`.
-5. Packa upp zip-filen på telefonen, öppna `app-debug.apk` och tillåt *Installera okända appar*.
+Varje push till `main` startar körningen **Bygg APK** under fliken **Actions** (ca 5 min). Den kan också startas för hand där med *Run workflow*.
+
+1. Öppna repots **Releases** på telefonen → **Hemma – senaste bygget**.
+2. Ladda ner `hemma.apk`, öppna den och tillåt *Installera okända appar*.
+
+APK:n finns också under **Artifacts** på varje körning (`hemma-apk`, som zip).
 
 Nya versioner installeras ovanpå den gamla (samma signeringsnyckel ingår i projektet), så dina maskiner och inställningar finns kvar.
 
