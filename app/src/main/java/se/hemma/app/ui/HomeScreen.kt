@@ -2,7 +2,13 @@
 
 package se.hemma.app.ui
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -16,18 +22,23 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -35,8 +46,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import se.hemma.app.data.PriceSettings
@@ -50,6 +63,10 @@ import se.hemma.app.ui.theme.color
 import java.time.Instant
 import java.time.ZonedDateTime
 
+/**
+ * Översikten visar bara det viktigaste: pris just nu, billigaste timmarna och
+ * när varje maskin ska startas. Allt annat ligger under "Visa mer" / tryck på raden.
+ */
 @Composable
 fun HomeScreen(
     state: UiState,
@@ -71,32 +88,82 @@ fun HomeScreen(
             if (!state.loading) item { EmptyCard(onRefresh) }
             return@LazyColumn
         }
-        item { NowCard(dash) }
-        item { ChartCard(dash, state.settings) }
-        item { CheapHoursCard(dash, state.settings) }
-        item { SectionTitle("Bästa tid att köra") }
-        if (dash.plans.isEmpty()) {
-            item {
-                HemmaCard {
-                    Text("Inga maskiner inlagda än.")
-                    TextButton(onClick = onOpenMachines) { Text("Lägg till maskiner") }
-                }
-            }
-        }
-        items(dash.plans, key = { it.machine.id }) { plan -> PlanCard(plan, dash.now) }
-        item { Footer(state) }
+        item(key = "now") { NowCard(dash) }
+        item(key = "cheap") { CheapHoursCard(dash, state.settings) }
+        item(key = "machines") { MachinesCard(dash, onOpenMachines) }
+        item(key = "footer") { Footer(state) }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Gemensamt: "Visa mer" och utfällbar del
+// ---------------------------------------------------------------------------
+
+@Composable
+private fun Details(visible: Boolean, content: @Composable () -> Unit) {
+    AnimatedVisibility(
+        visible = visible,
+        enter = expandVertically() + fadeIn(),
+        exit = shrinkVertically() + fadeOut(),
+    ) {
+        Column(Modifier.fillMaxWidth()) { content() }
     }
 }
 
 @Composable
+private fun ExpandToggle(expanded: Boolean, onToggle: () -> Unit, moreLabel: String = "Visa mer") {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .clickable(onClick = onToggle)
+            .padding(vertical = 6.dp),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            if (expanded) "Visa mindre" else moreLabel,
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.primary,
+        )
+        Spacer(Modifier.width(2.dp))
+        Chevron(expanded, MaterialTheme.colorScheme.primary)
+    }
+}
+
+@Composable
+private fun Chevron(expanded: Boolean, tint: Color, modifier: Modifier = Modifier) {
+    Icon(
+        if (expanded) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown,
+        contentDescription = if (expanded) "Dölj detaljer" else "Visa detaljer",
+        tint = tint,
+        modifier = modifier.size(20.dp),
+    )
+}
+
+@Composable
+private fun DetailLine(text: String) {
+    Text(
+        text,
+        style = MaterialTheme.typography.bodyMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(top = 4.dp),
+    )
+}
+
+// ---------------------------------------------------------------------------
+// Pris just nu
+// ---------------------------------------------------------------------------
+
+@Composable
 private fun NowCard(dash: Dashboard) {
+    var expanded by rememberSaveable { mutableStateOf(false) }
     val level = dash.level
     HemmaCard {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
-                val cur = dash.current
                 Text(
-                    if (cur != null) "Just nu · ${Fmt.time(cur.start)}–${Fmt.time(cur.end)}" else "Just nu",
+                    "Just nu",
                     style = MaterialTheme.typography.labelLarge,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -106,25 +173,8 @@ private fun NowCard(dash: Dashboard) {
                     fontWeight = FontWeight.Bold,
                     lineHeight = 44.sp,
                 )
-                if (cur != null) {
-                    Text(
-                        "Spotpris ${Fmt.perKwh(cur.spot)} exkl. moms · ${dash.area}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
             }
             LevelBadge(level)
-        }
-        val min = dash.todayMinTotal
-        val max = dash.todayMaxTotal
-        val avg = dash.todayAvgTotal
-        if (min != null && max != null && avg != null) {
-            Spacer(Modifier.height(10.dp))
-            Text(
-                "Idag ${Fmt.num(min)}–${Fmt.num(max)} kr/kWh · snitt ${Fmt.num(avg)} kr",
-                style = MaterialTheme.typography.bodyMedium,
-            )
         }
         val hint = when (level) {
             PriceLevel.CHEAP -> "👍 Bra läge att köra något nu"
@@ -135,6 +185,26 @@ private fun NowCard(dash: Dashboard) {
             Spacer(Modifier.height(6.dp))
             Text(hint, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium, color = level.color())
         }
+
+        Details(expanded) {
+            Spacer(Modifier.height(8.dp))
+            HorizontalDivider()
+            Spacer(Modifier.height(4.dp))
+            val cur = dash.current
+            if (cur != null) {
+                DetailLine("Gäller ${Fmt.time(cur.start)}–${Fmt.time(cur.end)}")
+                DetailLine("Spotpris ${Fmt.perKwh(cur.spot)} exkl. moms och avgifter · ${dash.area}")
+            }
+            val min = dash.todayMinTotal
+            val max = dash.todayMaxTotal
+            val avg = dash.todayAvgTotal
+            if (min != null && max != null && avg != null) {
+                DetailLine("Idag: lägst ${Fmt.num(min)} · högst ${Fmt.num(max)} · snitt ${Fmt.num(avg)} kr/kWh")
+            }
+            DetailLine("Priset är inklusive påslag, nätavgift, energiskatt och moms.")
+        }
+        Spacer(Modifier.height(4.dp))
+        ExpandToggle(expanded, { expanded = !expanded })
     }
 }
 
@@ -160,43 +230,106 @@ private fun LevelBadge(level: PriceLevel) {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Billigaste timmarna (graf och timpriser under "Visa mer")
+// ---------------------------------------------------------------------------
+
 @Composable
-private fun ChartCard(dash: Dashboard, settings: PriceSettings) {
-    var showTomorrow by rememberSaveable { mutableStateOf(false) }
-    val tomorrowAvailable = dash.tomorrow.isNotEmpty()
-    val tomorrow = showTomorrow && tomorrowAvailable
+private fun CheapHoursCard(dash: Dashboard, settings: PriceSettings) {
+    var expanded by rememberSaveable { mutableStateOf(false) }
     HemmaCard {
-        Row(
-            Modifier.horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            FilterChip(selected = !tomorrow, onClick = { showTomorrow = false }, label = { Text("Idag") })
-            FilterChip(
-                selected = tomorrow,
-                onClick = { showTomorrow = true },
-                enabled = tomorrowAvailable,
-                label = { Text(if (tomorrowAvailable) "Imorgon" else "Imorgon (ca 13:00)") },
-            )
-        }
-        Spacer(Modifier.height(8.dp))
-        PriceChart(
-            points = if (tomorrow) dash.tomorrow else dash.today,
-            cheap = if (tomorrow) dash.cheapTomorrow else dash.cheapToday,
-            settings = settings,
-            now = dash.now,
+        Text(
+            "Billigaste timmarna",
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold,
         )
-        Spacer(Modifier.height(6.dp))
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            LegendDot(LevelColors.Cheap)
-            Text(" Billigaste timmarna   ", style = MaterialTheme.typography.labelSmall)
-            LegendDot(LevelColors.Expensive)
-            Text(" Dyraste tredjedelen", style = MaterialTheme.typography.labelSmall)
+        Spacer(Modifier.height(8.dp))
+        SummaryRow("Idag", Fmt.hourRanges(dash.cheapToday))
+        SummaryRow(
+            "Imorgon",
+            if (dash.cheapTomorrow.isNotEmpty()) Fmt.hourRanges(dash.cheapTomorrow) else "kommer ca kl 13",
+            muted = dash.cheapTomorrow.isEmpty(),
+        )
+
+        Details(expanded) {
+            Spacer(Modifier.height(10.dp))
+            PriceChartSection(dash, settings)
+            Spacer(Modifier.height(14.dp))
+            Text(
+                "Pris per timme (snitt)",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(6.dp))
+            HourGrid("Idag", dash.cheapToday, settings, dash.now)
+            if (dash.cheapTomorrow.isNotEmpty()) {
+                Spacer(Modifier.height(6.dp))
+                HourGrid("Imorgon", dash.cheapTomorrow, settings, dash.now)
+            }
         }
+        Spacer(Modifier.height(4.dp))
+        ExpandToggle(expanded, { expanded = !expanded }, moreLabel = "Visa graf och priser")
     }
 }
 
 @Composable
-private fun LegendDot(color: androidx.compose.ui.graphics.Color) {
+private fun SummaryRow(label: String, value: String, muted: Boolean = false) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(vertical = 3.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            label,
+            style = MaterialTheme.typography.bodyLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.width(84.dp),
+        )
+        Text(
+            value,
+            style = MaterialTheme.typography.bodyLarge,
+            fontWeight = if (muted) FontWeight.Normal else FontWeight.SemiBold,
+            color = if (muted) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
+        )
+    }
+}
+
+@Composable
+private fun PriceChartSection(dash: Dashboard, settings: PriceSettings) {
+    var showTomorrow by rememberSaveable { mutableStateOf(false) }
+    val tomorrowAvailable = dash.tomorrow.isNotEmpty()
+    val tomorrow = showTomorrow && tomorrowAvailable
+    Row(
+        Modifier.horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        FilterChip(selected = !tomorrow, onClick = { showTomorrow = false }, label = { Text("Idag") })
+        FilterChip(
+            selected = tomorrow,
+            onClick = { showTomorrow = true },
+            enabled = tomorrowAvailable,
+            label = { Text(if (tomorrowAvailable) "Imorgon" else "Imorgon (ca 13:00)") },
+        )
+    }
+    Spacer(Modifier.height(8.dp))
+    PriceChart(
+        points = if (tomorrow) dash.tomorrow else dash.today,
+        cheap = if (tomorrow) dash.cheapTomorrow else dash.cheapToday,
+        settings = settings,
+        now = dash.now,
+    )
+    Spacer(Modifier.height(6.dp))
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        LegendDot(LevelColors.Cheap)
+        Text(" Billigaste timmarna   ", style = MaterialTheme.typography.labelSmall)
+        LegendDot(LevelColors.Expensive)
+        Text(" Dyraste tredjedelen", style = MaterialTheme.typography.labelSmall)
+    }
+}
+
+@Composable
+private fun LegendDot(color: Color) {
     Box(
         Modifier
             .size(8.dp)
@@ -206,37 +339,13 @@ private fun LegendDot(color: androidx.compose.ui.graphics.Color) {
 }
 
 @Composable
-private fun CheapHoursCard(dash: Dashboard, settings: PriceSettings) {
-    HemmaCard {
-        Text(
-            "De ${settings.cheapHoursCount} billigaste timmarna",
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.SemiBold,
-        )
-        Spacer(Modifier.height(8.dp))
-        HourGrid("Idag", dash.cheapToday, settings, dash.now)
-        if (dash.cheapTomorrow.isNotEmpty()) {
-            Spacer(Modifier.height(10.dp))
-            HourGrid("Imorgon", dash.cheapTomorrow, settings, dash.now)
-        } else {
-            Spacer(Modifier.height(6.dp))
-            Text(
-                "Morgondagens priser publiceras runt kl 13.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-    }
-}
-
-@Composable
 private fun HourGrid(title: String, slots: List<HourSlot>, settings: PriceSettings, now: ZonedDateTime) {
     Text(
-        "$title · ${Fmt.hourRanges(slots)}",
-        style = MaterialTheme.typography.labelLarge,
+        title,
+        style = MaterialTheme.typography.labelMedium,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
-    Spacer(Modifier.height(6.dp))
+    Spacer(Modifier.height(4.dp))
     slots.chunked(2).forEach { row ->
         Row(
             Modifier
@@ -264,61 +373,120 @@ private fun HourGrid(title: String, slots: List<HourSlot>, settings: PriceSettin
     }
 }
 
+// ---------------------------------------------------------------------------
+// Maskiner: en rad per maskin, tryck för detaljer
+// ---------------------------------------------------------------------------
+
 @Composable
-private fun PlanCard(plan: MachinePlan, now: ZonedDateTime) {
-    val m = plan.machine
+private fun MachinesCard(dash: Dashboard, onOpenMachines: () -> Unit) {
     HemmaCard {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(m.type.emoji, fontSize = 30.sp)
+        Text(
+            "Bästa tid att köra",
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold,
+        )
+        if (dash.plans.isEmpty()) {
+            Spacer(Modifier.height(6.dp))
+            Text("Inga maskiner inlagda än.", style = MaterialTheme.typography.bodyMedium)
+            TextButton(onClick = onOpenMachines) { Text("Lägg till maskiner") }
+        } else {
+            Spacer(Modifier.height(4.dp))
+            dash.plans.forEachIndexed { i, plan ->
+                if (i > 0) HorizontalDivider()
+                key(plan.machine.id) {
+                    PlanRow(plan, dash.now)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PlanRow(plan: MachinePlan, now: ZonedDateTime) {
+    var expanded by rememberSaveable { mutableStateOf(false) }
+    val m = plan.machine
+    val best = plan.best
+    Column(Modifier.fillMaxWidth()) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp))
+                .clickable { expanded = !expanded }
+                .padding(vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(m.type.emoji, fontSize = 26.sp)
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
-                Text(m.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                val details = buildString {
+                Text(
+                    m.name,
+                    style = MaterialTheme.typography.bodyLarge,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                when {
+                    best == null -> Text(
+                        "Väntar på priser",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    plan.startNowIsBest -> Text(
+                        "Starta nu",
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = LevelColors.Cheap,
+                    )
+                    else -> Text(
+                        "Starta ${Fmt.dayTime(best.start, now)}",
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
+            }
+            if (best != null) {
+                Text(
+                    Fmt.kr(best.cost),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
+            Spacer(Modifier.width(4.dp))
+            Chevron(expanded, MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+
+        Details(expanded) {
+            Column(Modifier.padding(start = 38.dp, bottom = 12.dp)) {
+                if (best == null) {
+                    DetailLine("Prisdata räcker inte för en hel körning ännu.")
+                } else {
+                    DetailLine(
+                        "Klar ${Fmt.dayTime(best.end, now)}" +
+                            (plan.deadline?.let { " · måste vara klar ${Fmt.dayTime(it, now)}" } ?: ""),
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Row(Modifier.fillMaxWidth()) {
+                        Stat("Kostar då", Fmt.kr(best.cost), Modifier.weight(1f), emphasize = true)
+                        Stat("Om du startar nu", plan.startNow?.let { Fmt.kr(it.cost) } ?: "–", Modifier.weight(1f))
+                        val saving = plan.saving
+                        Stat("Du sparar", if (saving != null && saving > 0.005) Fmt.kr(saving) else "–", Modifier.weight(1f))
+                    }
+                }
+                val info = buildString {
                     append("${Fmt.num(plan.kwh, 1)} kWh · ${Fmt.duration(plan.minutes)}")
                     if (m.model.isNotBlank()) append(" · ${m.model}")
                 }
-                Text(details, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                DetailLine(info)
+                if (plan.mightGetCheaper) {
+                    Text(
+                        "Morgondagens priser kommer runt kl 13 – det kan bli billigare då.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.tertiary,
+                        modifier = Modifier.padding(top = 6.dp),
+                    )
+                }
             }
-        }
-        Spacer(Modifier.height(12.dp))
-
-        val best = plan.best
-        if (best == null) {
-            Text(
-                "Prisdata räcker inte för en hel körning ännu.",
-                style = MaterialTheme.typography.bodyMedium,
-            )
-        } else {
-            if (plan.startNowIsBest) {
-                Text("Starta nu", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = LevelColors.Cheap)
-            } else {
-                Text(
-                    "Starta ${Fmt.dayTime(best.start, now)}",
-                    style = MaterialTheme.typography.headlineSmall,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.primary,
-                )
-            }
-            Text(
-                "Klar ${Fmt.dayTime(best.end, now)}" + (plan.deadline?.let { " · måste vara klar ${Fmt.dayTime(it, now)}" } ?: ""),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Spacer(Modifier.height(12.dp))
-            Row(Modifier.fillMaxWidth()) {
-                Stat("Kostar då", Fmt.kr(best.cost), Modifier.weight(1f), emphasize = true)
-                Stat("Om du startar nu", plan.startNow?.let { Fmt.kr(it.cost) } ?: "–", Modifier.weight(1f))
-                val saving = plan.saving
-                Stat("Du sparar", if (saving != null && saving > 0.005) Fmt.kr(saving) else "–", Modifier.weight(1f))
-            }
-        }
-        if (plan.mightGetCheaper) {
-            Spacer(Modifier.height(8.dp))
-            Text(
-                "Morgondagens priser kommer runt kl 13 – det kan bli billigare då.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.tertiary,
-            )
         }
     }
 }
@@ -329,11 +497,15 @@ private fun Stat(label: String, value: String, modifier: Modifier = Modifier, em
         Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Text(
             value,
-            style = if (emphasize) MaterialTheme.typography.titleLarge else MaterialTheme.typography.titleMedium,
+            style = if (emphasize) MaterialTheme.typography.titleMedium else MaterialTheme.typography.bodyLarge,
             fontWeight = if (emphasize) FontWeight.Bold else FontWeight.Normal,
         )
     }
 }
+
+// ---------------------------------------------------------------------------
+// Fel, tomt läge och sidfot
+// ---------------------------------------------------------------------------
 
 @Composable
 private fun ErrorCard(message: String, onRetry: () -> Unit) {
