@@ -40,8 +40,11 @@ object Fmt {
         }
     }
 
+    /** "02–05" för en period. */
+    fun range(r: TimeRange): String = "${r.start.format(hh)}–${endHour(r.start, r.end)}"
+
     /** Timme som "HH", där midnatt vid periodens slut skrivs "24". */
-    private fun endHour(start: ZonedDateTime, end: ZonedDateTime): String =
+    fun endHour(start: ZonedDateTime, end: ZonedDateTime): String =
         if (end.hour == 0 && end.toLocalDate().isAfter(start.toLocalDate())) "24" else end.format(hh)
 
     /** Slår ihop intilliggande timmar: [02, 03, 04, 14] → "02–05, 14–15". */

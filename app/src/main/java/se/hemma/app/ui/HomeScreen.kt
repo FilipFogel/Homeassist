@@ -8,14 +8,18 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -57,7 +61,9 @@ import se.hemma.app.domain.Dashboard
 import se.hemma.app.domain.Fmt
 import se.hemma.app.domain.HourSlot
 import se.hemma.app.domain.MachinePlan
+import se.hemma.app.domain.Planner
 import se.hemma.app.domain.PriceLevel
+import se.hemma.app.domain.TimeRange
 import se.hemma.app.ui.theme.LevelColors
 import se.hemma.app.ui.theme.color
 import java.time.Instant
@@ -88,8 +94,8 @@ fun HomeScreen(
             if (!state.loading) item { EmptyCard(onRefresh) }
             return@LazyColumn
         }
-        item(key = "now") { NowCard(dash) }
         item(key = "cheap") { CheapHoursCard(dash, state.settings) }
+        item(key = "now") { NowCard(dash) }
         item(key = "machines") { MachinesCard(dash, onOpenMachines) }
         item(key = "footer") { Footer(state) }
     }
@@ -237,19 +243,31 @@ private fun LevelBadge(level: PriceLevel) {
 @Composable
 private fun CheapHoursCard(dash: Dashboard, settings: PriceSettings) {
     var expanded by rememberSaveable { mutableStateOf(false) }
-    HemmaCard {
+    val now = dash.now
+    val todayRanges = Planner.ranges(dash.cheapToday)
+    val tomorrowRanges = Planner.ranges(dash.cheapTomorrow)
+    HemmaCard(container = LevelColors.Cheap.copy(alpha = 0.10f)) {
         Text(
             "Billigaste timmarna",
             style = MaterialTheme.typography.titleMedium,
             fontWeight = FontWeight.SemiBold,
         )
-        Spacer(Modifier.height(8.dp))
-        SummaryRow("Idag", Fmt.hourRanges(dash.cheapToday))
-        SummaryRow(
-            "Imorgon",
-            if (dash.cheapTomorrow.isNotEmpty()) Fmt.hourRanges(dash.cheapTomorrow) else "kommer ca kl 13",
-            muted = dash.cheapTomorrow.isEmpty(),
-        )
+        NextCheapLine(todayRanges + tomorrowRanges, now, tomorrowKnown = dash.tomorrow.isNotEmpty())
+
+        Spacer(Modifier.height(14.dp))
+        DayBlock("Idag", todayRanges, Planner.hourly(dash.today), dash.cheapToday, now)
+
+        Spacer(Modifier.height(16.dp))
+        if (tomorrowRanges.isNotEmpty()) {
+            DayBlock("Imorgon", tomorrowRanges, Planner.hourly(dash.tomorrow), dash.cheapTomorrow, now)
+        } else {
+            DayLabel("Imorgon")
+            Text(
+                "Priserna kommer ca kl 13",
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
 
         Details(expanded) {
             Spacer(Modifier.height(10.dp))
@@ -272,26 +290,120 @@ private fun CheapHoursCard(dash: Dashboard, settings: PriceSettings) {
     }
 }
 
+/** "Billigt nu – till kl 05", "Nästa om 2 h 10 min" eller "Inga fler billiga timmar idag". */
 @Composable
-private fun SummaryRow(label: String, value: String, muted: Boolean = false) {
-    Row(
+private fun NextCheapLine(ranges: List<TimeRange>, now: ZonedDateTime, tomorrowKnown: Boolean) {
+    val nowS = now.toEpochSecond()
+    val ongoing = ranges.firstOrNull { it.start.toEpochSecond() <= nowS && nowS < it.end.toEpochSecond() }
+    val next = ranges.firstOrNull { it.start.toEpochSecond() > nowS }
+    val text = when {
+        ongoing != null -> "⚡ Billigt nu – till kl ${Fmt.endHour(ongoing.start, ongoing.end)}"
+        next != null -> {
+            val minutes = ((next.start.toEpochSecond() - nowS + 59) / 60).toInt()
+            "Nästa om ${Fmt.duration(minutes)}"
+        }
+        tomorrowKnown -> "Inga fler billiga timmar"
+        else -> "Inga fler billiga timmar idag"
+    }
+    val highlight = ongoing != null || next != null
+    Text(
+        text,
+        style = MaterialTheme.typography.titleLarge,
+        fontWeight = FontWeight.Bold,
+        color = if (highlight) LevelColors.Cheap else MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(top = 2.dp),
+    )
+}
+
+@Composable
+private fun DayLabel(text: String) {
+    Text(
+        text.uppercase(),
+        style = MaterialTheme.typography.labelLarge,
+        fontWeight = FontWeight.SemiBold,
+        letterSpacing = 1.sp,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(bottom = 6.dp),
+    )
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun DayBlock(
+    label: String,
+    ranges: List<TimeRange>,
+    hours: List<HourSlot>,
+    cheap: List<HourSlot>,
+    now: ZonedDateTime,
+) {
+    DayLabel(label)
+    FlowRow(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        ranges.forEach { r -> RangePill(r, past = !r.end.isAfter(now)) }
+    }
+    Spacer(Modifier.height(10.dp))
+    HourStrip(hours, cheap, now)
+}
+
+/** Stor grön "02–05". Passerade perioder tonas ner. */
+@Composable
+private fun RangePill(r: TimeRange, past: Boolean) {
+    Box(
         Modifier
-            .fillMaxWidth()
-            .padding(vertical = 3.dp),
-        verticalAlignment = Alignment.CenterVertically,
+            .alpha(if (past) 0.35f else 1f)
+            .clip(RoundedCornerShape(14.dp))
+            .background(LevelColors.Cheap)
+            .padding(horizontal = 14.dp, vertical = 4.dp),
     ) {
         Text(
-            label,
-            style = MaterialTheme.typography.bodyLarge,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.width(84.dp),
+            Fmt.range(r),
+            color = Color.White,
+            fontSize = 26.sp,
+            lineHeight = 34.sp,
+            fontWeight = FontWeight.Bold,
         )
-        Text(
-            value,
-            style = MaterialTheme.typography.bodyLarge,
-            fontWeight = if (muted) FontWeight.Normal else FontWeight.SemiBold,
-            color = if (muted) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
-        )
+    }
+}
+
+/** Dygnet som 24 rutor: gröna = billigaste timmarna, ram = nuvarande timme. */
+@Composable
+private fun HourStrip(hours: List<HourSlot>, cheap: List<HourSlot>, now: ZonedDateTime) {
+    if (hours.isNotEmpty()) {
+        val cheapStarts = cheap.map { it.start.toEpochSecond() }.toSet()
+        val nowS = now.toEpochSecond()
+        val other = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f)
+        val marker = MaterialTheme.colorScheme.onSurface
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .height(22.dp),
+            horizontalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            hours.forEach { h ->
+                val start = h.start.toEpochSecond()
+                val isCheap = start in cheapStarts
+                val isNow = start <= nowS && nowS < h.end.toEpochSecond()
+                val past = !h.end.isAfter(now)
+                val shape = RoundedCornerShape(4.dp)
+                Box(
+                    Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                        .alpha(if (past && !isNow) 0.35f else 1f)
+                        .clip(shape)
+                        .background(if (isCheap) LevelColors.Cheap else other)
+                        .then(if (isNow) Modifier.border(2.dp, marker, shape) else Modifier),
+                )
+            }
+        }
+        Spacer(Modifier.height(2.dp))
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            listOf("00", "06", "12", "18", "24").forEach {
+                Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
     }
 }
 

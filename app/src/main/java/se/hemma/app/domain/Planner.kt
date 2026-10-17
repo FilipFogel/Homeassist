@@ -11,6 +11,9 @@ data class HourSlot(val start: ZonedDateTime, val end: ZonedDateTime, val avgSpo
 
 data class Window(val start: ZonedDateTime, val end: ZonedDateTime, val cost: Double)
 
+/** En sammanhängande period, t.ex. flera billiga timmar i rad. */
+data class TimeRange(val start: ZonedDateTime, val end: ZonedDateTime)
+
 enum class PriceLevel(val label: String) {
     CHEAP("Billigt"),
     NORMAL("Normalt"),
@@ -47,6 +50,20 @@ object Planner {
                 HourSlot(hour, ps.maxOf { it.end }, ps.map { it.spot }.average())
             }
             .sortedBy { it.start.toEpochSecond() }
+
+    /** Slår ihop intilliggande timmar till perioder: [02, 03, 04, 14] → 02–05, 14–15. */
+    fun ranges(slots: List<HourSlot>): List<TimeRange> {
+        val out = ArrayList<TimeRange>()
+        for (s in slots.sortedBy { it.start.toEpochSecond() }) {
+            val last = out.lastOrNull()
+            if (last != null && last.end.toEpochSecond() == s.start.toEpochSecond()) {
+                out[out.lastIndex] = TimeRange(last.start, s.end)
+            } else {
+                out.add(TimeRange(s.start, s.end))
+            }
+        }
+        return out
+    }
 
     /** De [count] billigaste timmarna, sorterade i tidsordning. */
     fun cheapestHours(points: List<PricePoint>, count: Int): List<HourSlot> =
