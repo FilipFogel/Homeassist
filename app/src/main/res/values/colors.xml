@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="app_bg">#FFF3F6F5</color>
+    <color name="brand">#FF0F7A6C</color>
+    <color name="icon_bg">#FF0F7A6C</color>
+
+    <color name="widget_bg">#F2FFFFFF</color>
+    <color name="widget_text">#FF14201E</color>
+    <color name="widget_subtext">#FF56635F</color>
+    <color name="widget_icon">#FF56635F</color>
+</resources>

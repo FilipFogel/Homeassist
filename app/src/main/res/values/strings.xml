@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Hemma</string>
+    <string name="widget_name">Hemma – elpris</string>
+    <string name="widget_description">Elpris just nu, billigaste timmarna och bästa tid för tvätt och laddning</string>
+</resources>
