@@ -8,7 +8,7 @@ Privat Android-app (Kotlin + Jetpack Compose) med hemskärmswidget. Fas 1:
 - **Bästa starttid och kostnad** för varje maskin: tvätt, torktumlare, elbil, disk …
   – vad det kostar då, vad det kostar om du startar nu och hur mycket du sparar
 - **Elbil** med "klar senast"-tid (t.ex. 07:00) – appen hittar billigaste laddfönstret före dess
-- **Widget** med pris, graf för kommande 24 h, billigaste timmar och bästa tid per maskin
+- **Widget** med pris just nu, kommande billigaste timmar och bästa starttid och kostnad för upp till tre maskiner
 
 Priserna är Nord Pools day-ahead-priser från [Elpriset just nu.se](https://www.elprisetjustnu.se) (gratis, ingen API-nyckel). Allt sparas bara i telefonen.
 
@@ -51,7 +51,7 @@ Kräver JDK 17 eller senare och ett Android SDK (platform 35, build-tools 35).
 
 ### Lägg till widgeten
 
-Håll fingret på hemskärmen → **Widgetar** → **Hemma – elpris**. Den är gjord för 4×3 rutor men går att ändra storlek på. Tryck på widgeten för att öppna appen, eller på ↻ för att uppdatera.
+Håll fingret på hemskärmen → **Widgetar** → **Hemma – elpris**. Den är gjord för 4×2 rutor men går att ändra storlek på. Tryck på widgeten för att öppna appen, eller på ↻ för att uppdatera.
 
 ---
 
@@ -80,7 +80,7 @@ app/src/main/java/se/hemma/app/
   data/      Models.kt (maskiner, inställningar), PriceRepository.kt (API + cache), SettingsStore.kt
   domain/    Planner.kt (billigaste timmar, bästa fönster), Dashboard.kt, Fmt.kt
   ui/        HomeScreen, MachinesScreen, SettingsScreen, PriceChart, MainViewModel, theme/
-  widget/    PriceWidgetProvider.kt, WidgetUpdater.kt (RemoteViews + diagram som bitmap)
+  widget/    PriceWidgetProvider.kt, WidgetUpdater.kt (RemoteViews)
   work/      RefreshWorker.kt (WorkManager)
 ```
 

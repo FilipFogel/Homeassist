@@ -8,4 +8,6 @@
     <color name="widget_text">#FF14201E</color>
     <color name="widget_subtext">#FF56635F</color>
     <color name="widget_icon">#FF56635F</color>
+    <color name="widget_cheap">#FF12804A</color>
+    <color name="widget_cheap_bg">#241E9E5A</color>
 </resources>

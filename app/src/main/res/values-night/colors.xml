@@ -6,4 +6,6 @@
     <color name="widget_text">#FFE7EFEC</color>
     <color name="widget_subtext">#FFA8B5B1</color>
     <color name="widget_icon">#FFA8B5B1</color>
+    <color name="widget_cheap">#FF4FCB8C</color>
+    <color name="widget_cheap_bg">#332FB56E</color>
 </resources>

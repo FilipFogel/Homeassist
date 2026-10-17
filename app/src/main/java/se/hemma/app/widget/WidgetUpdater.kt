@@ -5,10 +5,7 @@ import android.appwidget.AppWidgetManager
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
-import android.graphics.Bitmap
-import android.graphics.Canvas
-import android.graphics.Paint
-import android.graphics.RectF
+import android.view.View
 import android.widget.RemoteViews
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -16,18 +13,14 @@ import kotlinx.coroutines.withContext
 import se.hemma.app.MainActivity
 import se.hemma.app.R
 import se.hemma.app.data.PriceData
-import se.hemma.app.data.PricePoint
 import se.hemma.app.data.PriceRepository
-import se.hemma.app.data.PriceSettings
 import se.hemma.app.data.STOCKHOLM
 import se.hemma.app.data.SettingsStore
 import se.hemma.app.domain.Dashboard
 import se.hemma.app.domain.Fmt
-import se.hemma.app.domain.HourSlot
+import se.hemma.app.domain.Planner
 import se.hemma.app.domain.PriceLevel
 import java.time.ZonedDateTime
-import java.time.format.DateTimeFormatter
-import java.time.temporal.ChronoUnit
 
 object WidgetUpdater {
 
@@ -55,54 +48,61 @@ object WidgetUpdater {
             ?: PriceRepository(app).load(settings.area, allowNetwork = false).data
         val dash = Dashboard.build(data, settings, machines, ZonedDateTime.now(STOCKHOLM))
 
-        mgr.updateAppWidget(ids, buildViews(app, dash, settings))
+        mgr.updateAppWidget(ids, buildViews(app, dash))
     }
 
-    private fun buildViews(ctx: Context, dash: Dashboard, settings: PriceSettings): RemoteViews {
+    private val MACHINE_ROWS = listOf(
+        intArrayOf(R.id.w_m1, R.id.w_m1_name, R.id.w_m1_time, R.id.w_m1_cost),
+        intArrayOf(R.id.w_m2, R.id.w_m2_name, R.id.w_m2_time, R.id.w_m2_cost),
+        intArrayOf(R.id.w_m3, R.id.w_m3_name, R.id.w_m3_time, R.id.w_m3_cost),
+    )
+
+    private fun buildViews(ctx: Context, dash: Dashboard): RemoteViews {
         val rv = RemoteViews(ctx.packageName, R.layout.widget_price)
 
         rv.setTextViewText(R.id.w_price, dash.currentTotal?.let { Fmt.perKwh(it) } ?: "Inga priser än")
         rv.setTextViewText(R.id.w_level, if (dash.level == PriceLevel.UNKNOWN) "" else "● ${dash.level.label}")
         rv.setTextColor(R.id.w_level, levelColor(dash.level))
 
-        val sub = buildString {
-            append(settings.area)
-            dash.current?.let { append(" · ${Fmt.time(it.start)}–${Fmt.time(it.end)}") }
-            dash.todayAvgTotal?.let { append(" · snitt idag ${Fmt.num(it)} kr") }
-        }
-        rv.setTextViewText(R.id.w_sub, sub)
-
-        rv.setImageViewBitmap(
-            R.id.w_chart,
-            ChartBitmap.render(dash.next24h(), dash.cheapToday + dash.cheapTomorrow, settings, dash.now),
-        )
-
-        val cheap = buildString {
-            if (dash.cheapToday.isNotEmpty()) append("Billigast idag: ${Fmt.hourRanges(dash.cheapToday)}")
-            if (dash.cheapTomorrow.isNotEmpty()) {
-                if (isNotEmpty()) append("\n")
-                append("Imorgon: ${Fmt.hourRanges(dash.cheapTomorrow)}")
-            }
-        }
+        val cheap = cheapText(dash)
         rv.setTextViewText(R.id.w_cheap, cheap)
+        rv.setViewVisibility(R.id.w_cheap, if (cheap.isEmpty()) View.GONE else View.VISIBLE)
 
-        val lines = dash.plans
-            .filter { it.machine.showOnWidget }
-            .take(4)
-            .joinToString("\n") { p ->
-                val head = "${p.machine.type.emoji} ${p.machine.name}"
-                val best = p.best
-                when {
-                    best == null -> "$head: –"
-                    p.startNowIsBest -> "$head: starta nu · ${Fmt.kr(best.cost)}"
-                    else -> "$head: ${Fmt.dayTime(best.start, dash.now)} · ${Fmt.kr(best.cost)}"
-                }
+        val plans = dash.plans.filter { it.machine.showOnWidget }
+        MACHINE_ROWS.forEachIndexed { i, ids ->
+            val p = plans.getOrNull(i)
+            if (p == null) {
+                rv.setViewVisibility(ids[0], View.GONE)
+                return@forEachIndexed
             }
-        rv.setTextViewText(R.id.w_machines, lines)
+            val best = p.best
+            rv.setViewVisibility(ids[0], View.VISIBLE)
+            rv.setTextViewText(ids[1], "${p.machine.type.emoji} ${p.machine.name}")
+            rv.setTextViewText(
+                ids[2],
+                when {
+                    best == null -> "–"
+                    p.startNowIsBest -> "nu"
+                    else -> Fmt.dayTime(best.start, dash.now)
+                },
+            )
+            rv.setTextViewText(ids[3], best?.let { Fmt.kr(it.cost) } ?: "")
+        }
 
         rv.setOnClickPendingIntent(R.id.w_root, openAppIntent(ctx))
         rv.setOnClickPendingIntent(R.id.w_refresh, refreshIntent(ctx))
         return rv
+    }
+
+    /** "Billigast 22–24 · imorgon 00–04" – bara perioder som inte redan passerat. */
+    private fun cheapText(dash: Dashboard): String {
+        if (dash.today.isEmpty()) return ""
+        val today = Planner.ranges(dash.cheapToday).filter { it.end.isAfter(dash.now) }
+        val tomorrow = Planner.ranges(dash.cheapTomorrow)
+        val parts = ArrayList<String>()
+        if (today.isNotEmpty()) parts.add(today.joinToString(", ") { Fmt.range(it) })
+        if (tomorrow.isNotEmpty()) parts.add("imorgon " + tomorrow.joinToString(", ") { Fmt.range(it) })
+        return if (parts.isEmpty()) "Inga fler billiga timmar idag" else "Billigast " + parts.joinToString(" · ")
     }
 
     private fun levelColor(level: PriceLevel): Int = when (level) {
@@ -121,73 +121,5 @@ object WidgetUpdater {
     private fun refreshIntent(ctx: Context): PendingIntent {
         val intent = Intent(ctx, PriceWidgetProvider::class.java).setAction(PriceWidgetProvider.ACTION_REFRESH)
         return PendingIntent.getBroadcast(ctx, 2, intent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
-    }
-}
-
-/** Ritar widgetens stapeldiagram som en bitmap (RemoteViews kan inte rita själv). */
-object ChartBitmap {
-    private const val CHEAP = 0xFF1E9E5A.toInt()
-    private const val EXPENSIVE = 0xCCD64545.toInt()
-    private const val NORMAL = 0x668A9692
-    private const val CURRENT = 0xFF0F7A6C.toInt()
-    private const val LABEL = 0xFF8A9692.toInt()
-    private val HH: DateTimeFormatter = DateTimeFormatter.ofPattern("HH")
-
-    fun render(
-        points: List<PricePoint>,
-        cheap: List<HourSlot>,
-        settings: PriceSettings,
-        now: ZonedDateTime,
-        width: Int = 720,
-        height: Int = 150,
-    ): Bitmap {
-        val bmp = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
-        if (points.isEmpty()) return bmp
-        val canvas = Canvas(bmp)
-
-        val values = points.map { settings.totalPrice(it.spot) }
-        val maxV = maxOf(values.max(), 0.0)
-        val minV = minOf(values.min(), 0.0)
-        val range = (maxV - minV).let { if (it < 1e-9) 1.0 else it }
-        val labelH = 24f
-        val chartH = height - labelH
-        fun y(v: Double): Float = (chartH * (maxV - v) / range).toFloat()
-
-        val cheapStarts = cheap.map { it.start.toEpochSecond() }.toHashSet()
-        val sorted = values.sorted()
-        val hi = sorted[minOf(sorted.size - 1, sorted.size * 2 / 3)]
-        val n = points.size
-        val slot = width.toFloat() / n
-        val gap = if (n > 48) 1.5f else 3f
-        val nowEpoch = now.toEpochSecond()
-        val paint = Paint(Paint.ANTI_ALIAS_FLAG)
-
-        points.forEachIndexed { i, p ->
-            val v = values[i]
-            val isNow = p.start.toEpochSecond() <= nowEpoch && nowEpoch < p.end.toEpochSecond()
-            val hourStart = p.start.truncatedTo(ChronoUnit.HOURS).toEpochSecond()
-            paint.color = when {
-                isNow -> CURRENT
-                cheapStarts.contains(hourStart) -> CHEAP
-                v >= hi && v > sorted.first() -> EXPENSIVE
-                else -> NORMAL
-            }
-            val left = i * slot
-            val top = y(maxOf(v, 0.0))
-            val bottom = maxOf(y(minOf(v, 0.0)), top + 3f)
-            canvas.drawRoundRect(RectF(left, top, left + (slot - gap).coerceAtLeast(1f), bottom), 3f, 3f, paint)
-        }
-
-        val text = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = LABEL
-            textSize = 20f
-        }
-        points.forEachIndexed { i, p ->
-            val x = i * slot
-            if (p.start.minute == 0 && p.start.hour % 6 == 0 && x < width - 28f) {
-                canvas.drawText(p.start.format(HH), x, height - 4f, text)
-            }
-        }
-        return bmp
     }
 }
